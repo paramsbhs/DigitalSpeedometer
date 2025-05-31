@@ -1,5 +1,5 @@
 # ESP32-CanBus-Sniffer
-### This is a project I created to dive deeper into the embedded world and automotive software engineering. Check out the videos here:
+### This is a project I created to dive deeper into the embedded world and automotive software engineering. Check out the videos here: In Progress, stay tuned :\)
 
 ## Arduino libraries used
 https://github.com/collin80/esp32_can
