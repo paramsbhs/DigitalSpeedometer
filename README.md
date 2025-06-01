@@ -1,8 +1,13 @@
-# ESP32-CanBus-Sniffer
+# ESP32-CanBus-Sniffer RPM and Speed Gauge for 2006 Honda Civic Coupe
 ### This is a project I created to dive deeper into the embedded world and automotive software engineering. Check out the videos here: In Progress, stay tuned :\)
 
+## Software used
+Arduino IDE
+SavvyCAN (CAN Data Analysis)
+ChatGPT
+
 ## Arduino libraries used
-https://github.com/collin80/esp32_can
+https://github.com/collin80/esp32_can <br>
 https://github.com/collin80/can_common
 
 ## Materials used
