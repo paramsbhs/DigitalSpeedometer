@@ -1,7 +1,7 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
-
+#include "fonts/montserrat_bold_120.h"
 // Touchscreen pins
 #define XPT2046_IRQ 36   // T_IRQ
 #define XPT2046_MOSI 32  // T_DIN
@@ -15,162 +15,223 @@ XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 320
 
-// Touchscreen coordinates: (x, y) and pressure (z)
-// int x, y, z;
+// LVGL display buffer
+#define DRAW_BUF_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT / 10 * (LV_COLOR_DEPTH / 8))
+uint32_t draw_buf[DRAW_BUF_SIZE / 4];
 
-// #define DRAW_BUF_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT / 10 * (LV_COLOR_DEPTH / 8))
-// uint32_t draw_buf[DRAW_BUF_SIZE / 4];
+// Global components
+lv_obj_t *scr; // Screen background
+lv_obj_t *speed_arc; // Speed arc
+lv_obj_t *speed_needle; // Speed needle
+lv_obj_t *fuel_meter; // Fuel meter
+lv_obj_t *fuel_icon; // fuel icon
+lv_obj_t *rpm_label; // Digital MPH
+lv_obj_t *speed_border;
 
-// If logging is enabled, it will inform the user about what is happening in the library
-// void log_print(lv_log_level_t level, const char * buf) {
-//   LV_UNUSED(level);
-//   Serial.println(buf);
-//   Serial.flush();
-// }
+const int mwidth = 240;
+const int mheight = 240;
+const int rpmwidth = 16;
+const int rpmlinewidth = 4;
+const int dimension = 240;
+const int arcend = 344;
+const int arcstart = 120;
+const int rpmmax = 8000;
+const int rpm_arc_size = dimension - (rpmlinewidth * 12);
+const int rpm_freq = 200;
+const float marker_gap = ((float)arcend - arcstart) / (rpmmax / 1000);
+const int rpmredline = 6800;
+// Global styles
+static lv_style_t style_unit_text;
+static lv_style_t style_icon;
+static lv_style_t style_speed_text;
 
-// Get the Touchscreen data
-// void touchscreen_read(lv_indev_t * indev, lv_indev_data_t * data) {
-//   // Checks if Touchscreen was touched, and prints X, Y and Pressure (Z)
-//   if(touchscreen.tirqTouched() && touchscreen.touched()) {
-//     // Get Touchscreen points
-//     TS_Point p = touchscreen.getPoint();
-//     // Calibrate Touchscreen points with map function to the correct width and height
-//     x = map(p.x, 200, 3700, 1, SCREEN_WIDTH);
-//     y = map(p.y, 240, 3800, 1, SCREEN_HEIGHT);
-//     z = p.z;
+// Color palette
+lv_color_t palette_amber = lv_color_hex(0xFA8C00);
+lv_color_t palette_cyan = lv_color_hex(0x00FFFF);
+lv_color_t palette_black = lv_color_hex(0x000000);
+lv_color_t palette_red = lv_color_hex(0xFF0000);
+lv_color_t palette_white = lv_color_hex(0xFFFFFF);
+lv_color_t palette_grey = lv_color_hex(0x5A5A5A);
+lv_color_t palette_dark_grey = lv_color_hex(0x3C3C3C);
+lv_color_t palette_purple = lv_color_hex(0x9D00FF);
+lv_color_t palette_yellow = lv_color_hex(0xFFFF00);
 
-//     data->state = LV_INDEV_STATE_PRESSED;
+#define FUEL_SYMBOL "\xEF\x94\xAF"
 
-//     // Set the coordinates
-//     data->point.x = x;
-//     data->point.y = y;
+void make_styles(void) {
+    lv_style_init(&style_unit_text);
+    lv_style_set_text_font(&style_unit_text, &lv_font_montserrat_28);
+    lv_style_set_text_color(&style_unit_text, palette_red);
+}
 
-//     // Print Touchscreen info about X, Y and Pressure (Z) on the Serial Monitor
-//     /* Serial.print("X = ");
-//     Serial.print(x);
-//     Serial.print(" | Y = ");
-//     Serial.print(y);
-//     Serial.print(" | Pressure = ");
-//     Serial.print(z);
-//     Serial.println();*/
-//   }
-//   else {
-//     data->state = LV_INDEV_STATE_RELEASED;
-//   }
-// }
+void make_speed_meter(void) {
+    speed_arc = lv_arc_create(scr);
+    lv_obj_set_size(speed_arc, mwidth, mheight);
+    lv_obj_set_pos(speed_arc, 1, 1);
+    lv_arc_set_bg_angles(speed_arc, arcstart, arcend); // 270 degree arc
+    lv_arc_set_mode(speed_arc, LV_ARC_MODE_NORMAL);
 
-// int btn1_count = 0;
-// // Callback that is triggered when btn1 is clicked
-// static void event_handler_btn1(lv_event_t * e) {
-//   lv_event_code_t code = lv_event_get_code(e);
-//   if(code == LV_EVENT_CLICKED) {
-//     btn1_count++;
-//     LV_LOG_USER("Button clicked %d", (int)btn1_count);
-//   }
-// }
+    lv_obj_set_style_arc_color(speed_arc, palette_grey, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(speed_arc, palette_yellow, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(speed_arc, rpmwidth, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(speed_arc, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(speed_arc, rpmwidth, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(speed_arc, false, LV_PART_INDICATOR);
+    lv_obj_remove_style(speed_arc, NULL, LV_PART_KNOB);
 
-// // Callback that is triggered when btn2 is clicked/toggled
-// static void event_handler_btn2(lv_event_t * e) {
-//   lv_event_code_t code = lv_event_get_code(e);
-//   lv_obj_t * obj = (lv_obj_t*) lv_event_get_target(e);
-//   if(code == LV_EVENT_VALUE_CHANGED) {
-//     LV_UNUSED(obj);
-//     LV_LOG_USER("Toggled %s", lv_obj_has_state(obj, LV_STATE_CHECKED) ? "on" : "off");
-//   }
-// }
+    lv_arc_set_range(speed_arc, 0, rpmmax);
+    lv_arc_set_value(speed_arc, 7000);
+}
 
-// static lv_obj_t * slider_label;
-// // Callback that prints the current slider value on the TFT display and Serial Monitor for debugging purposes
-// static void slider_event_callback(lv_event_t * e) {
-//   lv_obj_t * slider = (lv_obj_t*) lv_event_get_target(e);
-//   char buf[8];
-//   lv_snprintf(buf, sizeof(buf), "%d%%", (int)lv_slider_get_value(slider));
-//   lv_label_set_text(slider_label, buf);
-//   lv_obj_align_to(slider_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-//   LV_LOG_USER("Slider changed to %d%%", (int)lv_slider_get_value(slider));
-// }
-
-// void lv_create_main_gui(void) {
-//   // Create a text label aligned center on top ("Hello, world!")
-//   lv_obj_t * text_label = lv_label_create(lv_screen_active());
-//   lv_label_set_long_mode(text_label, LV_LABEL_LONG_WRAP);    // Breaks the long lines
-//   lv_label_set_text(text_label, "Hello world!");
-//   lv_obj_set_width(text_label, 150);    // Set smaller width to make the lines wrap
-//   lv_obj_set_style_text_align(text_label, LV_TEXT_ALIGN_CENTER, 0);
-//   lv_obj_align(text_label, LV_ALIGN_CENTER, 0, -90);
-
-  // lv_obj_t * btn_label;
-  // // Create a Button (btn1)
-  // lv_obj_t * btn1 = lv_button_create(lv_screen_active());
-  // lv_obj_add_event_cb(btn1, event_handler_btn1, LV_EVENT_ALL, NULL);
-  // lv_obj_align(btn1, LV_ALIGN_CENTER, 0, -50);
-  // lv_obj_remove_flag(btn1, LV_OBJ_FLAG_PRESS_LOCK);
-
-  // btn_label = lv_label_create(btn1);
-  // lv_label_set_text(btn_label, "Button");
-  // lv_obj_center(btn_label);
-
-  // // Create a Toggle button (btn2)
-  // lv_obj_t * btn2 = lv_button_create(lv_screen_active());
-  // lv_obj_add_event_cb(btn2, event_handler_btn2, LV_EVENT_ALL, NULL);
-  // lv_obj_align(btn2, LV_ALIGN_CENTER, 0, 10);
-  // lv_obj_add_flag(btn2, LV_OBJ_FLAG_CHECKABLE);
-  // lv_obj_set_height(btn2, LV_SIZE_CONTENT);
-
-  // btn_label = lv_label_create(btn2);
-  // lv_label_set_text(btn_label, "Toggle");
-  // lv_obj_center(btn_label);
-  
-  // // Create a slider aligned in the center bottom of the TFT display
-  // lv_obj_t * slider = lv_slider_create(lv_screen_active());
-  // lv_obj_align(slider, LV_ALIGN_CENTER, 0, 60);
-  // lv_obj_add_event_cb(slider, slider_event_callback, LV_EVENT_VALUE_CHANGED, NULL);
-  // lv_slider_set_range(slider, 0, 100);
-  // lv_obj_set_style_anim_duration(slider, 2000, 0);
-
-  // // Create a label below the slider to display the current slider value
-  // slider_label = lv_label_create(lv_screen_active());
-  // lv_label_set_text(slider_label, "0%");
-  // lv_obj_align_to(slider_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-// }
-
-// void setup() {
-//   String LVGL_Arduino = String("LVGL Library Version: ") + lv_version_major() + "." + lv_version_minor() + "." + lv_version_patch();
-//   Serial.begin(115200);
-//   Serial.println(LVGL_Arduino);
-  
-//   // Start LVGL
-//   lv_init();
-//   // Register print function for debugging
-//   lv_log_register_print_cb(log_print);
-
-//   // Start the SPI for the touchscreen and init the touchscreen
-//   touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
-//   touchscreen.begin(touchscreenSPI);
-//   // Set the Touchscreen rotation in landscape mode
-//   // Note: in some displays, the touchscreen might be upside down, so you might need to set the rotation to 0: touchscreen.setRotation(0);
-//   touchscreen.setRotation(2);
-
-//   // Create a display object
-//   lv_display_t * disp;
-//   // Initialize the TFT display using the TFT_eSPI library
-//   disp = lv_tft_espi_create(SCREEN_WIDTH, SCREEN_HEIGHT, draw_buf, sizeof(draw_buf));
-//   lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
+void position_markers(lv_obj_t *marker, int position) {
+    lv_obj_set_size(marker, mwidth, mheight);
+    lv_obj_set_pos(marker, 1, 1);
     
-//   // Initialize an LVGL input device object (Touchscreen)
-//   lv_indev_t * indev = lv_indev_create();
-//   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-//   // Set the callback function to read Touchscreen input
-//   //lv_indev_set_read_cb(indev, touchscreen_read);
+    lv_obj_set_style_arc_width(marker, rpmwidth + (rpmlinewidth * 2), LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(marker, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(marker, palette_black, LV_PART_MAIN);
+    float marker_angle = arcstart + (position * marker_gap);
+    lv_arc_set_bg_angles(marker, (int)marker_angle, (int)marker_angle + 2);
+    lv_obj_remove_style(marker, NULL, LV_PART_KNOB); 
+    lv_obj_remove_style(marker, NULL, LV_PART_INDICATOR);    
+}
 
 
-//   // Function to draw the GUI (text, buttons and sliders)
-//   lv_create_main_gui();
+void make_speed_border(void){
+    speed_border = lv_arc_create(scr);
+    lv_obj_set_size(speed_border, mwidth-27, mheight-27);
+    lv_obj_set_pos(speed_border, 15, 15);
+    lv_arc_set_bg_angles(speed_border, arcstart, arcend-56);
+
+    lv_obj_set_style_arc_width(speed_border, rpmlinewidth, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(speed_border, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(speed_border, palette_black, LV_PART_MAIN);
+
+    lv_obj_remove_style(speed_border, NULL, LV_PART_KNOB);
+    lv_obj_remove_style(speed_border, NULL, LV_PART_INDICATOR);
+    int rpmmarker = (rpmmax/1000) + 1;
+    lv_obj_t *rpmmarkers[rpmmarker];
+    for(int i = 0; i < rpmmarker; i++){
+      rpmmarkers[i] = lv_arc_create(scr);
+      position_markers(rpmmarkers[i], i);
+    }
+}
+
+void make_redline(void){
+    lv_obj_t *redlinemarker = lv_arc_create(scr);
+    lv_obj_set_size(redlinemarker, mwidth-27, mheight-27);
+    lv_obj_set_pos(redlinemarker, 15, 15);
+    lv_arc_set_bg_angles(redlinemarker, arcend-56, arcend);
+
+    lv_obj_set_style_arc_width(redlinemarker, rpmlinewidth, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(redlinemarker, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(redlinemarker, palette_cyan, LV_PART_MAIN);
+
+    lv_obj_remove_style(redlinemarker, NULL, LV_PART_KNOB);
+    lv_obj_remove_style(redlinemarker, NULL, LV_PART_INDICATOR);
+}
+// void make_fuel_meter(void) {
+//   // Adjust size and position for smaller screen
+//   fuel_meter = lv_arc_create(scr);
+//   lv_obj_set_size(fuel_meter, 180, 180);
+//   lv_arc_set_rotation(fuel_meter, 65);
+//   lv_arc_set_bg_angles(fuel_meter, 0, 50);
+//   lv_arc_set_range(fuel_meter, 0, 100);
+//   lv_obj_set_pos(fuel_meter, 30, 30);
+//   lv_arc_set_mode(fuel_meter, LV_ARC_MODE_REVERSE);
+
+//   lv_obj_set_style_arc_color(fuel_meter, palette_dark_grey, LV_PART_MAIN);
+//   lv_obj_set_style_arc_color(fuel_meter, palette_white, LV_PART_INDICATOR);
+//   lv_obj_set_style_arc_rounded(fuel_meter, false, LV_PART_MAIN);
+//   lv_obj_set_style_arc_rounded(fuel_meter, false, LV_PART_INDICATOR);
+//   lv_obj_set_style_arc_width(fuel_meter, 3, LV_PART_MAIN);
+//   lv_obj_set_style_arc_width(fuel_meter, 3, LV_PART_INDICATOR);
+//   lv_obj_remove_style(fuel_meter, NULL, LV_PART_KNOB); 
+  
+//   lv_obj_set_style_arc_color(fuel_meter, palette_amber, LV_PART_INDICATOR);
+//   lv_arc_set_value(fuel_meter, 50);
+
+//   fuel_icon = lv_label_create(scr);
+//   lv_label_set_text(fuel_icon, "F");  // Simple F instead of icon
+//   lv_obj_add_style(fuel_icon, &style_icon, 0);
+//   lv_obj_set_pos(fuel_icon, 115, 170);
 // }
 
-// void loop() {
-//   lv_task_handler();  // let the GUI do its work
-//   lv_tick_inc(5);     // tell LVGL how much time has passed
-//   delay(5);           // let this time pass
-// }
+void make_rpm_digital(void) {
+    static lv_style_t style_rpm_text;
+    lv_style_init(&style_rpm_text);
+    lv_style_set_text_font(&style_rpm_text, &lv_font_montserrat_28);
+    lv_style_set_text_color(&style_rpm_text, palette_black);
 
+    rpm_label = lv_label_create(scr);
+    lv_label_set_text(rpm_label, "7000");
+    lv_obj_add_style(rpm_label, &style_rpm_text, 0);
+    lv_obj_align(rpm_label, LV_ALIGN_LEFT_MID, 220, 0);
+
+    lv_obj_t *rpm_unit_label = lv_label_create(scr);
+    lv_label_set_text(rpm_unit_label, "rpm");
+    lv_obj_add_style(rpm_unit_label, &style_unit_text, 0);
+    lv_obj_align(rpm_unit_label, LV_ALIGN_LEFT_MID, 260, 20);
+}
+
+
+void make_speed_digital(void) {
+    static lv_style_t style_speed_text;
+    lv_style_init(&style_speed_text);
+    lv_style_set_text_font(&style_speed_text, &montserrat_bold_120);
+    lv_style_set_text_color(&style_speed_text, palette_white);
+
+    kph_label = lv_label_create(scr);
+    lv_label_set_text(kph_label, "85");
+    lv_obj_add_style(kph_label, &style_speed_text, 0);
+    lv_obj_align(kph_label, LV_ALIGN_CENTER, 0, 0);
+
+    lv_obj_t *mph_unit_label = lv_label_create(scr);
+    lv_label_set_text(mph_unit_label, "kph");
+    lv_obj_add_style(mph_unit_label, &style_unit_text, 0);
+    lv_obj_align(mph_unit_label, LV_ALIGN_CENTER, 40, 60);
+}
+
+
+void setup() {
+  Serial.begin(115200);
+  
+  String LVGL_Arduino = String("LVGL Library Version: ") + lv_version_major() + "." + lv_version_minor() + "." + lv_version_patch();
+  Serial.println(LVGL_Arduino);
+  
+  lv_init();
+
+  touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+  touchscreen.begin(touchscreenSPI);
+  touchscreen.setRotation(2);
+
+  lv_display_t * disp;
+  disp = lv_tft_espi_create(SCREEN_WIDTH, SCREEN_HEIGHT, draw_buf, sizeof(draw_buf));
+  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
+    
+  scr = lv_screen_active();
+  lv_obj_set_style_bg_color(scr, palette_black, 1);
+
+  make_styles();
+
+  make_speed_meter();
+  make_speed_border();
+  make_redline();
+  make_rpm_digital();
+  make_speed_digital();
+
+  Serial.println("Speedometer initialized!");
+}
+
+void loop() {
+  lv_task_handler();
+  lv_tick_inc(5);
+  delay(5);
+  
+  // Simulate data updates
+ // if (millis() - last_update > 2000) {
+    // Example: simulate changing speed and fuel
+    // Replace this with your actual data reading code
+    //last_update = millis();
+  //}
+}
